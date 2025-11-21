@@ -1,25 +1,90 @@
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, flash, Response
+    session, flash, Response, g
 )
-from flask_pymongo import PyMongo
-from bson import ObjectId
 from datetime import datetime
 import csv
 from io import StringIO
+import pymysql
+from pymysql.cursors import DictCursor
 
 from config import config
 
 app = Flask(__name__)
 app.config.from_object(config["default"])
-mongo = PyMongo(app)
 
-# Collections
-students_col = mongo.db.students
-classes_col = mongo.db.classes
-sections_col = mongo.db.sections
-attendance_col = mongo.db.attendance
+# MySQL connection function
+def get_db():
+    if 'db' not in g:
+        g.db = pymysql.connect(
+            host=app.config['MYSQL_HOST'],
+            user=app.config['MYSQL_USER'],
+            password=app.config['MYSQL_PASSWORD'],
+            database=app.config['MYSQL_DB'],
+            cursorclass=DictCursor
+        )
+    return g.db
 
+@app.teardown_appcontext
+def close_db(e=None):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
+# Initialize database tables
+def init_db():
+    db = get_db()
+    with db.cursor() as cursor:
+        # Create classes table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS classes (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            class_name VARCHAR(255) NOT NULL
+        )
+        """)
+        
+        # Create sections table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sections (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            section_name VARCHAR(255) NOT NULL,
+            class_id INT NOT NULL,
+            FOREIGN KEY (class_id) REFERENCES classes(id)
+        )
+        """)
+        
+        # Create students table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS students (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            class_id INT NOT NULL,
+            section_id INT NOT NULL,
+            roll_no INT NOT NULL,
+            FOREIGN KEY (class_id) REFERENCES classes(id),
+            FOREIGN KEY (section_id) REFERENCES sections(id)
+        )
+        """)
+        
+        # Create attendance table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS attendance (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            date DATE NOT NULL,
+            class_id INT NOT NULL,
+            section_id INT NOT NULL,
+            student_id INT NOT NULL,
+            status ENUM('Present', 'Absent') NOT NULL,
+            FOREIGN KEY (class_id) REFERENCES classes(id),
+            FOREIGN KEY (section_id) REFERENCES sections(id),
+            FOREIGN KEY (student_id) REFERENCES students(id)
+        )
+        """)
+    db.commit()
+
+# Initialize database on startup
+with app.app_context():
+    init_db()
 
 # ---------- Helpers ----------
 
@@ -66,15 +131,23 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    total_students = students_col.count_documents({})
-    total_classes = classes_col.count_documents({})
-    total_sections = sections_col.count_documents({})
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) as count FROM students")
+        total_students = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM classes")
+        total_classes = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM sections")
+        total_sections = cursor.fetchone()['count']
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    today_attendance = list(attendance_col.find({"date": today_str}))
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        cursor.execute("SELECT * FROM attendance WHERE date = %s", (today_str,))
+        today_attendance = cursor.fetchall()
 
-    present_count = sum(1 for a in today_attendance if a.get("status") == "Present")
-    absent_count = sum(1 for a in today_attendance if a.get("status") == "Absent")
+        present_count = sum(1 for a in today_attendance if a.get("status") == "Present")
+        absent_count = sum(1 for a in today_attendance if a.get("status") == "Absent")
 
     today_display = datetime.now().strftime("%d/%m/%Y")
 
@@ -94,8 +167,13 @@ def dashboard():
 @app.route("/attendance/take", methods=["GET", "POST"])
 @login_required
 def take_attendance():
-    classes = list(classes_col.find())
-    sections = list(sections_col.find())
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("SELECT * FROM classes")
+        classes = cursor.fetchall()
+        
+        cursor.execute("SELECT * FROM sections")
+        sections = cursor.fetchall()
 
     selected_date = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
     selected_class = request.args.get("class_id") or ""
@@ -105,41 +183,49 @@ def take_attendance():
     existing_attendance = {}
 
     if selected_class and selected_section:
-        students = list(students_col.find({
-            "class_id": ObjectId(selected_class),
-            "section_id": ObjectId(selected_section)
-        }).sort("roll_no", 1))
-
-        records = list(attendance_col.find({
-            "date": selected_date,
-            "class_id": ObjectId(selected_class),
-            "section_id": ObjectId(selected_section)
-        }))
-        for rec in records:
-            existing_attendance[str(rec["student_id"])] = rec["status"]
+        db = get_db()
+        with db.cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM students 
+                WHERE class_id = %s AND section_id = %s 
+                ORDER BY roll_no
+            """, (selected_class, selected_section))
+            students = cursor.fetchall()
+            
+            cursor.execute("""
+                SELECT * FROM attendance 
+                WHERE date = %s AND class_id = %s AND section_id = %s
+            """, (selected_date, selected_class, selected_section))
+            records = cursor.fetchall()
+            
+            for rec in records:
+                existing_attendance[str(rec["student_id"])] = rec["status"]
 
     if request.method == "POST":
         selected_date = request.form.get("date")
         selected_class = request.form.get("class_id")
         selected_section = request.form.get("section_id")
 
-        attendance_col.delete_many({
-            "date": selected_date,
-            "class_id": ObjectId(selected_class),
-            "section_id": ObjectId(selected_section)
-        })
-
-        for key in request.form:
-            if key.startswith("status_"):
-                student_id = key.split("_", 1)[1]
-                status = request.form.get(key)
-                attendance_col.insert_one({
-                    "date": selected_date,
-                    "class_id": ObjectId(selected_class),
-                    "section_id": ObjectId(selected_section),
-                    "student_id": ObjectId(student_id),
-                    "status": status
-                })
+        db = get_db()
+        with db.cursor() as cursor:
+            # Delete existing attendance records
+            cursor.execute("""
+                DELETE FROM attendance 
+                WHERE date = %s AND class_id = %s AND section_id = %s
+            """, (selected_date, selected_class, selected_section))
+            
+            # Insert new attendance records
+            for key in request.form:
+                if key.startswith("status_"):
+                    student_id = key.split("_", 1)[1]
+                    status = request.form.get(key)
+                    cursor.execute("""
+                        INSERT INTO attendance 
+                        (date, class_id, section_id, student_id, status)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (selected_date, selected_class, selected_section, student_id, status))
+            
+            db.commit()
 
         flash("Attendance saved successfully.", "success")
         return redirect(
@@ -159,28 +245,33 @@ def take_attendance():
     )
 
 
-# ---------- Attendance Summary (New) ----------
+# ---------- Attendance Summary ----------
 
 @app.route("/attendance/summary", methods=["GET"])
 @login_required
 def attendance_summary():
     selected_date = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
+    
+    db = get_db()
+    with db.cursor() as cursor:
+        # Fetch all classes and sections
+        cursor.execute("SELECT * FROM classes")
+        classes = {str(c["id"]): c["class_name"] for c in cursor.fetchall()}
+        
+        cursor.execute("SELECT * FROM sections")
+        sections = cursor.fetchall()
 
-    # Fetch all classes and sections
-    classes = {str(c["_id"]): c["class_name"] for c in classes_col.find()}
-    sections = list(sections_col.find())
-
-    # Fetch all attendance for the selected date
-    attendance_records = list(attendance_col.find({"date": selected_date}))
+        # Fetch all attendance for the selected date
+        cursor.execute("SELECT * FROM attendance WHERE date = %s", (selected_date,))
+        attendance_records = cursor.fetchall()
 
     summary_data = []
     has_data = False
 
     # Organize data structure
-    # Iterate through every section to ensure we show 0s for sections with no attendance
     for sec in sections:
         class_id = str(sec["class_id"])
-        section_id = str(sec["_id"])
+        section_id = str(sec["id"])
         
         # Get Class Name (skip if orphan section)
         class_name = classes.get(class_id)
@@ -230,22 +321,36 @@ def view_attendance():
     section_id = request.args.get("section_id", "")
     search = request.args.get("search", "").strip()
 
-    query = {}
+    query = "SELECT * FROM attendance WHERE 1=1"
+    params = []
+    
     if date:
-        query["date"] = date
+        query += " AND date = %s"
+        params.append(date)
     elif date_from and date_to:
-        query["date"] = {"$gte": date_from, "$lte": date_to}
+        query += " AND date BETWEEN %s AND %s"
+        params.extend([date_from, date_to])
 
     if class_id:
-        query["class_id"] = ObjectId(class_id)
+        query += " AND class_id = %s"
+        params.append(class_id)
     if section_id:
-        query["section_id"] = ObjectId(section_id)
+        query += " AND section_id = %s"
+        params.append(section_id)
 
-    records = list(attendance_col.find(query))
-
-    class_map = {str(c["_id"]): c["class_name"] for c in classes_col.find()}
-    section_map = {str(s["_id"]): s["section_name"] for s in sections_col.find()}
-    student_map = {str(s["_id"]): s for s in students_col.find()}
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute(query, params)
+        records = cursor.fetchall()
+        
+        cursor.execute("SELECT * FROM classes")
+        class_map = {str(c["id"]): c["class_name"] for c in cursor.fetchall()}
+        
+        cursor.execute("SELECT * FROM sections")
+        section_map = {str(s["id"]): s["section_name"] for s in cursor.fetchall()}
+        
+        cursor.execute("SELECT * FROM students")
+        student_map = {str(s["id"]): s for s in cursor.fetchall()}
 
     rows = []
     for rec in records:
@@ -274,8 +379,13 @@ def view_attendance():
             "status": rec["status"]
         })
 
-    classes = list(classes_col.find())
-    sections = list(sections_col.find())
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("SELECT * FROM classes")
+        classes = cursor.fetchall()
+        
+        cursor.execute("SELECT * FROM sections")
+        sections = cursor.fetchall()
 
     return render_template(
         "attendance_view.html",
@@ -296,8 +406,13 @@ def view_attendance():
 @app.route("/attendance/reports", methods=["GET", "POST"])
 @login_required
 def attendance_reports():
-    classes = list(classes_col.find())
-    sections = list(sections_col.find())
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("SELECT * FROM classes")
+        classes = cursor.fetchall()
+        
+        cursor.execute("SELECT * FROM sections")
+        sections = cursor.fetchall()
 
     if request.method == "POST":
         report_type = request.form.get("report_type")
@@ -307,22 +422,36 @@ def attendance_reports():
         class_id = request.form.get("class_id", "")
         section_id = request.form.get("section_id", "")
 
-        query = {}
+        query = "SELECT * FROM attendance WHERE 1=1"
+        params = []
+        
         if date:
-            query["date"] = date
+            query += " AND date = %s"
+            params.append(date)
         elif date_from and date_to:
-            query["date"] = {"$gte": date_from, "$lte": date_to}
+            query += " AND date BETWEEN %s AND %s"
+            params.extend([date_from, date_to])
 
         if class_id and class_id != "all":
-            query["class_id"] = ObjectId(class_id)
+            query += " AND class_id = %s"
+            params.append(class_id)
         if section_id and section_id != "all":
-            query["section_id"] = ObjectId(section_id)
+            query += " AND section_id = %s"
+            params.append(section_id)
 
-        records = list(attendance_col.find(query))
-
-        class_map = {str(c["_id"]): c["class_name"] for c in classes_col.find()}
-        section_map = {str(s["_id"]): s["section_name"] for s in sections_col.find()}
-        student_map = {str(s["_id"]): s for s in students_col.find()}
+        db = get_db()
+        with db.cursor() as cursor:
+            cursor.execute(query, params)
+            records = cursor.fetchall()
+            
+            cursor.execute("SELECT * FROM classes")
+            class_map = {str(c["id"]): c["class_name"] for c in cursor.fetchall()}
+            
+            cursor.execute("SELECT * FROM sections")
+            section_map = {str(s["id"]): s["section_name"] for s in cursor.fetchall()}
+            
+            cursor.execute("SELECT * FROM students")
+            student_map = {str(s["id"]): s for s in cursor.fetchall()}
 
         output = StringIO()
         writer = csv.writer(output)
@@ -363,9 +492,17 @@ def attendance_reports():
 @app.route("/students")
 @login_required
 def students():
-    students_list = list(students_col.find())
-    classes = {str(c["_id"]): c["class_name"] for c in classes_col.find()}
-    sections = {str(s["_id"]): s["section_name"] for s in sections_col.find()}
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("SELECT * FROM students")
+        students_list = cursor.fetchall()
+        
+        cursor.execute("SELECT * FROM classes")
+        classes = {str(c["id"]): c["class_name"] for c in cursor.fetchall()}
+        
+        cursor.execute("SELECT * FROM sections")
+        sections = {str(s["id"]): s["section_name"] for s in cursor.fetchall()}
+    
     return render_template(
         "students.html",
         students=students_list,
@@ -382,12 +519,13 @@ def add_student():
     section_id = request.form.get("section_id")
     roll_no = request.form.get("roll_no")
 
-    students_col.insert_one({
-        "name": name,
-        "class_id": ObjectId(class_id),
-        "section_id": ObjectId(section_id),
-        "roll_no": int(roll_no)
-    })
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO students (name, class_id, section_id, roll_no)
+            VALUES (%s, %s, %s, %s)
+        """, (name, class_id, section_id, roll_no))
+        db.commit()
 
     flash("Student added successfully.", "success")
     return redirect(url_for("students"))
@@ -401,15 +539,15 @@ def edit_student(id):
     section_id = request.form.get("section_id")
     roll_no = request.form.get("roll_no")
 
-    students_col.update_one(
-        {"_id": ObjectId(id)},
-        {"$set": {
-            "name": name,
-            "class_id": ObjectId(class_id),
-            "section_id": ObjectId(section_id),
-            "roll_no": int(roll_no)
-        }}
-    )
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("""
+            UPDATE students 
+            SET name = %s, class_id = %s, section_id = %s, roll_no = %s
+            WHERE id = %s
+        """, (name, class_id, section_id, roll_no, id))
+        db.commit()
+    
     flash("Student updated successfully.", "success")
     return redirect(url_for("students"))
 
@@ -417,8 +555,12 @@ def edit_student(id):
 @app.route("/students/delete/<id>", methods=["POST"])
 @login_required
 def delete_student(id):
-    students_col.delete_one({"_id": ObjectId(id)})
-    attendance_col.delete_many({"student_id": ObjectId(id)})
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("DELETE FROM students WHERE id = %s", (id,))
+        cursor.execute("DELETE FROM attendance WHERE student_id = %s", (id,))
+        db.commit()
+    
     flash("Student deleted successfully.", "success")
     return redirect(url_for("students"))
 
@@ -428,8 +570,14 @@ def delete_student(id):
 @app.route("/classes-sections")
 @login_required
 def classes_sections():
-    classes = list(classes_col.find())
-    sections = list(sections_col.find())
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("SELECT * FROM classes")
+        classes = cursor.fetchall()
+        
+        cursor.execute("SELECT * FROM sections")
+        sections = cursor.fetchall()
+    
     return render_template(
         "classes_sections.html",
         classes=classes,
@@ -441,7 +589,12 @@ def classes_sections():
 @login_required
 def add_class():
     class_name = request.form.get("class_name").strip()
-    classes_col.insert_one({"class_name": class_name})
+    
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("INSERT INTO classes (class_name) VALUES (%s)", (class_name,))
+        db.commit()
+    
     flash("Class added successfully.", "success")
     return redirect(url_for("classes_sections"))
 
@@ -450,10 +603,16 @@ def add_class():
 @login_required
 def edit_class(id):
     class_name = request.form.get("class_name").strip()
-    classes_col.update_one(
-        {"_id": ObjectId(id)},
-        {"$set": {"class_name": class_name}}
-    )
+    
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("""
+            UPDATE classes 
+            SET class_name = %s
+            WHERE id = %s
+        """, (class_name, id))
+        db.commit()
+    
     flash("Class updated successfully.", "success")
     return redirect(url_for("classes_sections"))
 
@@ -461,13 +620,22 @@ def edit_class(id):
 @app.route("/classes/delete/<id>", methods=["POST"])
 @login_required
 def delete_class(id):
-    linked_students = students_col.count_documents({"class_id": ObjectId(id)})
-    linked_sections = sections_col.count_documents({"class_id": ObjectId(id)})
-    if linked_students > 0 or linked_sections > 0:
-        flash("Cannot delete class. It is linked to students/sections.", "danger")
-        return redirect(url_for("classes_sections"))
+    db = get_db()
+    with db.cursor() as cursor:
+        # Check if class has linked students or sections
+        cursor.execute("SELECT COUNT(*) as count FROM students WHERE class_id = %s", (id,))
+        linked_students = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM sections WHERE class_id = %s", (id,))
+        linked_sections = cursor.fetchone()['count']
+        
+        if linked_students > 0 or linked_sections > 0:
+            flash("Cannot delete class. It is linked to students/sections.", "danger")
+            return redirect(url_for("classes_sections"))
 
-    classes_col.delete_one({"_id": ObjectId(id)})
+        cursor.execute("DELETE FROM classes WHERE id = %s", (id,))
+        db.commit()
+    
     flash("Class deleted successfully.", "success")
     return redirect(url_for("classes_sections"))
 
@@ -477,10 +645,15 @@ def delete_class(id):
 def add_section():
     section_name = request.form.get("section_name").strip()
     class_id = request.form.get("class_id")
-    sections_col.insert_one({
-        "section_name": section_name,
-        "class_id": ObjectId(class_id)
-    })
+    
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO sections (section_name, class_id)
+            VALUES (%s, %s)
+        """, (section_name, class_id))
+        db.commit()
+    
     flash("Section added successfully.", "success")
     return redirect(url_for("classes_sections"))
 
@@ -490,13 +663,16 @@ def add_section():
 def edit_section(id):
     section_name = request.form.get("section_name").strip()
     class_id = request.form.get("class_id")
-    sections_col.update_one(
-        {"_id": ObjectId(id)},
-        {"$set": {
-            "section_name": section_name,
-            "class_id": ObjectId(class_id)
-        }}
-    )
+    
+    db = get_db()
+    with db.cursor() as cursor:
+        cursor.execute("""
+            UPDATE sections 
+            SET section_name = %s, class_id = %s
+            WHERE id = %s
+        """, (section_name, class_id, id))
+        db.commit()
+    
     flash("Section updated successfully.", "success")
     return redirect(url_for("classes_sections"))
 
@@ -504,12 +680,19 @@ def edit_section(id):
 @app.route("/sections/delete/<id>", methods=["POST"])
 @login_required
 def delete_section(id):
-    linked_students = students_col.count_documents({"section_id": ObjectId(id)})
-    if linked_students > 0:
-        flash("Cannot delete section. It is linked to students.", "danger")
-        return redirect(url_for("classes_sections"))
+    db = get_db()
+    with db.cursor() as cursor:
+        # Check if section has linked students
+        cursor.execute("SELECT COUNT(*) as count FROM students WHERE section_id = %s", (id,))
+        linked_students = cursor.fetchone()['count']
+        
+        if linked_students > 0:
+            flash("Cannot delete section. It is linked to students.", "danger")
+            return redirect(url_for("classes_sections"))
 
-    sections_col.delete_one({"_id": ObjectId(id)})
+        cursor.execute("DELETE FROM sections WHERE id = %s", (id,))
+        db.commit()
+    
     flash("Section deleted successfully.", "success")
     return redirect(url_for("classes_sections"))
 
