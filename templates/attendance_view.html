@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Records{% endblock %}
+
+{% block content %}
+<div class="mb-5 border-bottom pb-3">
+    <h2 class="fw-bold mb-0">Attendance Records</h2>
+</div>
+
+<form method="GET" class="row g-3 mb-5 align-items-end">
+    <div class="col-md-2 col-6">
+        <label class="form-label">Date</label>
+        <input type="date" name="date" value="{{ date }}" class="form-control">
+    </div>
+
+    <div class="col-md-2 col-6">
+        <label class="form-label">Class</label>
+        <select name="class_id" class="form-select">
+            <option value="">All Classes</option>
+            {% for c in classes %}
+            <option value="{{ c._id }}" {% if selected_class == c._id|string %}selected{% endif %}>{{ c.class_name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="col-md-6 col-12">
+        <label class="form-label">Search Student</label>
+        <div class="input-group">
+            <span class="input-group-text bg-white border-end-0" style="border-radius: 12px 0 0 12px; border-color: #d9d9e3;">
+                <i class="bi bi-search text-muted"></i>
+            </span>
+            <input type="text" name="search" value="{{ search }}" class="form-control border-start-0" placeholder="Search by Name or Roll Number..." style="border-radius: 0 12px 12px 0;">
+        </div>
+    </div>
+
+    <div class="col-md-2 col-12">
+        <button class="btn btn-dark w-100" style="border-radius: 12px;">Apply Filters</button>
+    </div>
+</form>
+
+<div class="table-responsive">
+    <table class="table align-middle mb-0">
+        <thead>
+            <tr>
+                <th class="ps-3">Date</th>
+                <th>Class Details</th>
+                <th>Student Info</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td class="ps-3 text-secondary fw-500">{{ row.date }}</td>
+                
+                <td>
+                    <span class="fw-bold text-dark">{{ row.class_name }}</span> 
+                    <span class="badge bg-light text-dark border ms-2" style="font-weight: 500;">{{ row.section_name }}</span>
+                </td>
+                
+                <td>
+                    <div class="fw-bold text-dark">{{ row.student_name }}</div>
+                    <div class="small text-muted">Roll: #{{ row.roll_no }}</div>
+                </td>
+                
+                <td>
+                    {% if row.status == 'Present' %}
+                    <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-3 py-2">
+                        <i class="bi bi-check-circle-fill me-1"></i> Present
+                    </span>
+                    {% else %}
+                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-3 py-2">
+                        <i class="bi bi-x-circle-fill me-1"></i> Absent
+                    </span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" class="text-center py-5">
+                    <div class="text-muted opacity-50 mb-2">
+                        <i class="bi bi-inbox fs-1"></i>
+                    </div>
+                    <p class="text-muted small mb-0">No attendance records found for these filters.</p>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

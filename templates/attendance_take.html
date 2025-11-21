@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+{% block title %}Take Attendance{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* --- iOS Style Toggle Switch --- */
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 50px;
+        height: 28px;
+    }
+
+    .switch input { 
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background-color: #ef4444; /* Default Red (Absent) */
+        transition: .4s;
+        border-radius: 34px;
+    }
+
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 20px;
+        width: 20px;
+        left: 4px;
+        bottom: 4px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    /* Checked State (Present) */
+    input:checked + .slider {
+        background-color: #10a37f; /* Green */
+    }
+
+    input:checked + .slider:before {
+        transform: translateX(22px);
+    }
+
+    /* Label Text next to toggle */
+    .toggle-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-right: 8px;
+        color: #6e6e80;
+        text-transform: uppercase;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mb-5 border-bottom pb-3">
+    <h2 class="fw-bold mb-0">Take Attendance</h2>
+</div>
+
+<!-- Filter Section -->
+<form method="GET" class="row g-4 mb-5 align-items-end">
+    <div class="col-md-3">
+        <label class="form-label">Date</label>
+        <input type="date" name="date" value="{{ selected_date }}" class="form-control" required>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Class</label>
+        <select name="class_id" id="class_select" class="form-select" required>
+            <option value="">Select Class</option>
+            {% for c in classes %}
+            <option value="{{ c._id }}" {% if selected_class == c._id|string %}selected{% endif %}>{{ c.class_name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Section</label>
+        <select name="section_id" id="section_select" class="form-select" required>
+            <option value="">Select Section</option>
+            {% for s in sections %}
+            <option value="{{ s._id }}" data-class-id="{{ s.class_id }}" {% if selected_section == s._id|string %}selected{% endif %}>
+                {{ s.section_name }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <button class="btn btn-dark w-100" style="border-radius: 12px;">Load Students</button>
+    </div>
+</form>
+
+{% if students %}
+<form method="POST">
+    <!-- Header Row -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-none d-md-block">
+            <span class="badge bg-dark text-white rounded-pill px-3">{{ students|length }} Students</span>
+        </div>
+        
+        <!-- Mobile Optimized Button Group -->
+        <div class="d-flex flex-nowrap gap-2 w-100 w-md-auto justify-content-end">
+            <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3 text-nowrap flex-fill flex-md-grow-0" id="markAllPresent">
+                <i class="bi bi-check-all me-1"></i> All Present
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3 text-nowrap flex-fill flex-md-grow-0" id="markAllAbsent">
+                <i class="bi bi-x-lg me-1"></i> All Absent
+            </button>
+        </div>
+    </div>
+    
+    <input type="hidden" name="date" value="{{ selected_date }}">
+    <input type="hidden" name="class_id" value="{{ selected_class }}">
+    <input type="hidden" name="section_id" value="{{ selected_section }}">
+
+    <div class="table-responsive mb-5">
+        <table class="table align-middle mb-0">
+            <thead>
+                <tr>
+                    <th class="ps-3">Student Name</th>
+                    <th>Roll No</th>
+                    <th class="text-end pe-3">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in students %}
+                {% set sid = s._id|string %}
+                {% set current_status = existing_attendance.get(sid, 'Present') %}
+                <tr>
+                    <td class="ps-3 fw-bold text-dark">{{ s.name }}</td>
+                    <td class="text-muted">#{{ s.roll_no }}</td>
+                    <td class="text-end pe-3">
+                        <div class="d-flex align-items-center justify-content-end">
+                            <!-- Visual Text -->
+                            <span class="toggle-label" id="label_{{ sid }}">
+                                {{ 'Present' if current_status == 'Present' else 'Absent' }}
+                            </span>
+
+                            <!-- Toggle Switch -->
+                            <label class="switch">
+                                <input type="checkbox" 
+                                       class="status-toggle" 
+                                       data-id="{{ sid }}"
+                                       {% if current_status == 'Present' %}checked{% endif %}>
+                                <span class="slider"></span>
+                            </label>
+
+                            <!-- Hidden Input -->
+                            <input type="hidden" 
+                                   id="input_{{ sid }}" 
+                                   name="status_{{ sid }}" 
+                                   value="{{ current_status }}">
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="d-grid d-md-flex justify-content-md-end">
+        <button class="btn btn-gpt px-5 py-3 fw-bold">Save Attendance</button>
+    </div>
+</form>
+
+{% elif selected_class and selected_section %}
+<!-- Empty State: When class is selected but no students found -->
+<div class="text-center py-5 mt-4">
+    <div class="mb-3 text-secondary opacity-25">
+        <i class="bi bi-clipboard-x" style="font-size: 5rem;"></i>
+    </div>
+    <h5 class="fw-bold text-secondary">No Student Data Available</h5>
+    <p class="text-muted small">There are no students registered in this Class & Section.</p>
+    <a href="{{ url_for('students') }}" class="btn btn-sm btn-outline-dark rounded-pill mt-2 px-4">Add Students</a>
+</div>
+
+{% else %}
+<!-- Initial State: Prompt user to select -->
+<div class="text-center py-5 mt-4">
+    <div class="mb-3 text-secondary opacity-25">
+        <i class="bi bi-ui-checks-grid" style="font-size: 5rem;"></i>
+    </div>
+    <h5 class="fw-bold text-secondary">Ready to Take Attendance</h5>
+    <p class="text-muted small">Please select a Date, Class, and Section to load the list.</p>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // --- Attendance Toggle Logic ---
+    const toggles = document.querySelectorAll('.status-toggle');
+    
+    function updateState(checkbox) {
+        const sid = checkbox.getAttribute('data-id');
+        const input = document.getElementById('input_' + sid);
+        const label = document.getElementById('label_' + sid);
+        
+        if (checkbox.checked) {
+            input.value = "Present";
+            label.innerText = "PRESENT";
+            label.style.color = "#10a37f"; 
+        } else {
+            input.value = "Absent";
+            label.innerText = "ABSENT";
+            label.style.color = "#ef4444"; 
+        }
+    }
+
+    toggles.forEach(toggle => {
+        toggle.addEventListener('change', (e) => updateState(e.target));
+        updateState(toggle); 
+    });
+
+    document.getElementById("markAllPresent")?.addEventListener("click", () => {
+        toggles.forEach(t => { t.checked = true; updateState(t); });
+    });
+
+    document.getElementById("markAllAbsent")?.addEventListener("click", () => {
+        toggles.forEach(t => { t.checked = false; updateState(t); });
+    });
+
+    // --- Class & Section Filter Logic ---
+    document.addEventListener('DOMContentLoaded', function() {
+        const classSelect = document.getElementById('class_select');
+        const sectionSelect = document.getElementById('section_select');
+        
+        // 1. Save all section options (except the first placeholder)
+        const allSections = Array.from(sectionSelect.querySelectorAll('option')).slice(1);
+        
+        function filterSections() {
+            const selectedClassId = classSelect.value;
+            const currentSectionId = sectionSelect.value;
+
+            // 2. Reset dropdown
+            sectionSelect.innerHTML = '<option value="">Select Section</option>';
+            
+            // 3. Filter options
+            allSections.forEach(option => {
+                if (!selectedClassId || option.dataset.classId === selectedClassId) {
+                    sectionSelect.appendChild(option);
+                }
+            });
+
+            // 4. Restore selection if valid
+            if (Array.from(sectionSelect.options).some(opt => opt.value === currentSectionId)) {
+                sectionSelect.value = currentSectionId;
+            } else {
+                sectionSelect.value = "";
+            }
+        }
+
+        classSelect.addEventListener('change', filterSections);
+        filterSections(); // Run on load
+    });
+</script>
+{% endblock %}

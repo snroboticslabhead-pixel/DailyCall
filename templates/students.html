@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Students{% endblock %}
+
+{% block content %}
+<div class="mb-5 border-bottom pb-3">
+    <h2 class="fw-bold mb-0">Manage Students</h2>
+</div>
+
+<div class="row g-5">
+    <div class="col-lg-4">
+        <h5 class="fw-bold mb-4">Add New Student</h5>
+        
+        <form method="POST" action="{{ url_for('add_student') }}">
+            <div class="mb-3">
+                <label class="form-label">Full Name</label>
+                <input type="text" name="name" class="form-control" placeholder="Student Name" required>
+            </div>
+
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <label class="form-label">Class</label>
+                    <select name="class_id" class="form-select" required>
+                        <option value="">Select</option>
+                        {% for cid, cname in classes.items() %}
+                        <option value="{{ cid }}">{{ cname }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Section</label>
+                    <select name="section_id" class="form-select" required>
+                        <option value="">Select</option>
+                        {% for sid, sname in sections.items() %}
+                        <option value="{{ sid }}">{{ sname }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label">Roll No</label>
+                <input type="number" name="roll_no" class="form-control" placeholder="#" required>
+            </div>
+
+            <button class="btn btn-gpt w-100">Add Student</button>
+        </form>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h5 class="fw-bold mb-0">Directory</h5>
+            <span class="badge bg-white text-dark border rounded-pill">{{ students|length }} Records</span>
+        </div>
+        
+        <div class="table-responsive">
+            <table class="table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Student</th>
+                        <th>Class Details</th>
+                        <th class="text-end pe-3">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in students %}
+                    <tr>
+                        <td class="ps-3">
+                            <div class="fw-bold text-dark">{{ s.name }}</div>
+                            <div class="small text-muted">Roll: #{{ s.roll_no }}</div>
+                        </td>
+
+                        <td>
+                            <div class="fw-bold text-dark">{{ classes.get(s.class_id|string, '?') }}</div>
+                            <div class="small text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                                Section {{ sections.get(s.section_id|string, '?') }}
+                            </div>
+                        </td>
+
+                        <td class="text-end pe-3">
+                            <div class="d-flex justify-content-end gap-2">
+                                <button class="btn btn-light btn-sm rounded-pill border px-3" data-bs-toggle="collapse" data-bs-target="#edit{{ s._id }}">
+                                    Edit
+                                </button>
+                                <form action="{{ url_for('delete_student', id=s._id) }}" method="POST" onsubmit="return confirm('Delete?');">
+                                    <button class="btn btn-light btn-sm rounded-pill border text-danger px-3">Delete</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <tr class="collapse" id="edit{{ s._id }}">
+                        <td colspan="3" class="p-3 bg-white border-bottom">
+                            <div class="bg-light p-3 rounded-3 border">
+                                <h6 class="fw-bold mb-3 small text-uppercase text-muted">Edit Student</h6>
+                                <form method="POST" action="{{ url_for('edit_student', id=s._id) }}">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-md-3 col-12">
+                                            <label class="form-label mb-1 small">Name</label>
+                                            <input type="text" name="name" class="form-control form-control-sm" value="{{ s.name }}">
+                                        </div>
+                                        <div class="col-6 col-md-2">
+                                            <label class="form-label mb-1 small">Class</label>
+                                            <select name="class_id" class="form-select form-select-sm">
+                                                {% for cid, cname in classes.items() %}
+                                                <option value="{{ cid }}" {% if s.class_id|string == cid %}selected{% endif %}>{{ cname }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-6 col-md-2">
+                                            <label class="form-label mb-1 small">Section</label>
+                                            <select name="section_id" class="form-select form-select-sm">
+                                                {% for sid, sname in sections.items() %}
+                                                <option value="{{ sid }}" {% if s.section_id|string == sid %}selected{% endif %}>{{ sname }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-6 col-md-2">
+                                            <label class="form-label mb-1 small">Roll No</label>
+                                            <input type="number" name="roll_no" class="form-control form-control-sm" value="{{ s.roll_no }}">
+                                        </div>
+                                        <div class="col-6 col-md-3">
+                                            <button class="btn btn-gpt btn-sm w-100">Save</button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

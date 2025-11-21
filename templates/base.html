@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}DailyCall{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-color: #ffffff;
+            --sidebar-bg: #f9f9f9;
+            --border-color: #ececf1;
+            --accent-color: #10a37f;
+            --text-main: #202123;
+            --text-muted: #6e6e80;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow-x: hidden;
+        }
+
+        .app-wrapper { display: flex; height: 100vh; width: 100%; overflow: hidden; }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            transition: transform 0.3s ease;
+        }
+        .sidebar-header { padding: 1.5rem; display: flex; align-items: center; gap: 12px; font-weight: 600; color: var(--text-main); }
+        .nav-link {
+            display: flex; align-items: center; gap: 12px; padding: 10px 16px; margin: 4px 12px;
+            border-radius: 8px; color: #40414f; text-decoration: none; font-size: 0.9rem; font-weight: 500;
+        }
+        .nav-link:hover { background-color: #ececf1; }
+        .nav-link.active { background-color: #e5e5e5; color: #000; font-weight: 600; }
+
+        /* Content Area */
+        .main-content { flex: 1; overflow-y: auto; background-color: #ffffff; display: flex; flex-direction: column; }
+        .content-body { padding: 2rem 3rem; max-width: 1400px; margin: 0 auto; width: 100%; }
+
+        /* UI Elements */
+        .btn { border-radius: 50px; padding: 10px 24px; font-weight: 500; font-size: 0.95rem; }
+        .btn-gpt { background-color: var(--accent-color); color: white; border: none; }
+        .btn-gpt:hover { background-color: #1a7f64; color: white; }
+        
+        .form-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); margin-left: 10px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        
+        .form-control, .form-select {
+            border-radius: 12px;
+            border: 1px solid #d9d9e3;
+            padding: 12px 16px;
+            background-color: #fff;
+            font-size: 0.95rem;
+            color: var(--text-main);
+            box-shadow: none;
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1);
+        }
+
+        /* Table Styling */
+        .table th {
+            font-weight: 600; color: var(--text-muted); border-bottom: 2px solid #ececf1;
+            text-transform: uppercase; font-size: 0.75rem; padding: 1rem 1rem;
+        }
+        .table td {
+            padding: 1rem 1rem; border-bottom: 1px solid #f2f2f2; vertical-align: middle;
+        }
+
+        /* Mobile Header Styling */
+        .mobile-header {
+            display: none; /* Hidden on Desktop */
+            position: relative;
+            height: 72px;
+            align-items: center;
+            padding: 0 24px;
+            background: #fff;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .mobile-header-title {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+        }
+
+        .menu-btn {
+            background: transparent;
+            border: none;
+            padding: 8px;
+            margin-left: -8px;
+            color: #40414f;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+        }
+        
+        .menu-btn:hover { background-color: #f5f5f5; color: #000; }
+
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; height: 100%; z-index: 1000; transform: translateX(-100%); box-shadow: 5px 0 15px rgba(0,0,0,0.05); }
+            .sidebar.open { transform: translateX(0); }
+            .mobile-header { display: flex; }
+            .content-body { padding: 1.5rem; }
+            .overlay { position: fixed; top: 0; left: 0; bottom: 0; right: 0; background: rgba(0,0,0,0.2); z-index: 999; display: none; }
+            .overlay.active { display: block; }
+        }
+    </style>
+</head>
+<body>
+
+{% if not session.get('admin_logged_in') and request.endpoint == 'login' %}
+    {% block login_content %}{% endblock %}
+{% else %}
+<div class="app-wrapper">
+    <!-- Mobile Overlay -->
+    <div class="overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <!-- Sidebar Logo & Name -->
+            <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+                <img src="https://i.ibb.co/XfTt0XBD/image-removebg-preview-36-1-removebg-preview.png" alt="DailyCall Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+            </div>
+            <span>DailyCall</span>
+        </div>
+        <nav class="flex-grow-1 px-2 mt-3">
+            <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}"><i class="bi bi-speedometer2"></i> Dashboard</a>
+            <a href="{{ url_for('take_attendance') }}" class="nav-link {% if 'take_attendance' in request.endpoint %}active{% endif %}"><i class="bi bi-check-circle"></i> Take Attendance</a>
+            <!-- New Summary Link -->
+            <a href="{{ url_for('attendance_summary') }}" class="nav-link {% if 'summary' in request.endpoint %}active{% endif %}"><i class="bi bi-bar-chart-steps"></i> Summary</a>
+            
+            <a href="{{ url_for('view_attendance') }}" class="nav-link {% if 'view_attendance' in request.endpoint %}active{% endif %}"><i class="bi bi-list-ul"></i> Records</a>
+            <a href="{{ url_for('attendance_reports') }}" class="nav-link {% if 'reports' in request.endpoint %}active{% endif %}"><i class="bi bi-download"></i> Reports</a>
+            <div class="my-3 mx-3 border-top"></div>
+            <a href="{{ url_for('students') }}" class="nav-link {% if 'students' in request.endpoint %}active{% endif %}"><i class="bi bi-people"></i> Students</a>
+            <a href="{{ url_for('classes_sections') }}" class="nav-link {% if 'classes' in request.endpoint %}active{% endif %}"><i class="bi bi-layers"></i> Classes</a>
+        </nav>
+        <div class="p-3 border-top">
+            <!-- Profile Icon & Name -->
+            <div class="d-flex align-items-center gap-3 px-2 mb-3">
+                <i class="bi bi-person-circle fs-4 text-secondary"></i>
+                <div class="d-flex flex-column">
+                    <span class="fw-bold small text-dark">{{ session.get('admin_name', 'Admin') }}</span>
+                    <span class="text-muted" style="font-size: 0.75rem;">Administrator</span>
+                </div>
+            </div>
+            <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm w-100 rounded-pill">Log out</a>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <!-- Mobile Header (Text Only) -->
+        <header class="mobile-header">
+            <button class="menu-btn" onclick="toggleSidebar()">
+                <i class="bi bi-layout-sidebar" style="font-size: 1.4rem;"></i>
+            </button>
+            
+            <!-- Centered Brand Title -->
+            <span class="mobile-header-title">DailyCall</span>
+        </header>
+
+        <div class="content-body">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="mb-4">
+                    {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show rounded-4 border-0 shadow-sm" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+</div>
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('sidebarOverlay').classList.toggle('active');}</script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>
